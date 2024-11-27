@@ -1,0 +1,26 @@
+FROM python:3.10-slim
+# возьмите образ, который скачали ранее и в котором уже установлен Python
+
+LABEL author=${LABEL}
+# добавьте label, используя переменную среды
+
+COPY ./app ./recsys_bank
+# скопируйте файлы в Docker
+# название директории внутри контейнера: churn_app
+
+WORKDIR recsys_bank 
+# измените рабочую директорию Docker 
+
+RUN pip3 install --upgrade pip
+RUN pip3 install -r requirements.txt
+# инструкция для установки библиотек
+
+EXPOSE ${APP_PORT}
+# инструкции для открытия порта, указанного в переменной среды
+
+VOLUME /data ./data
+# примонтируйте том с моделями
+
+CMD uvicorn recommendation_service:app --reload --port ${APP_PORT} --host 0.0.0.0
+# измените команду запуска, учитывая порт из .env
+

@@ -1,0 +1,7 @@
+prometheus-fastapi-instrumentator
+pyarrow
+fastparquet
+fastapi
+pandas
+requests
+uvicorn
