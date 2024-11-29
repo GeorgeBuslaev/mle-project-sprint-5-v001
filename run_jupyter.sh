@@ -6,7 +6,7 @@ if [ ! -d ./.venv_recsys_bank ]; then
   python3 -m venv .venv_recsys_bank
   source ./.venv_recsys_bank/bin/activate
   echo "Установим Jupyter Lab и создадим Kernel"
-  pip install -r requrements.txt
+  pip install -r requirements.txt
   python -m ipykernel install --user --name=mle-bank-recsys-kernel
   jupyter lab --no-browser
   exit 1
