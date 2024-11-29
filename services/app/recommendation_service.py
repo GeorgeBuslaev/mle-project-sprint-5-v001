@@ -1,16 +1,29 @@
 import logging
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
 from prometheus_fastapi_instrumentator import Instrumentator
 import logging as logger
 import pandas as pd
+from pydantic import BaseSettings
+import asyncio
 import json
 
 logger = logging.getLogger("uvicorn.error")
 
+class Config(BaseSettings):
+    recommendations_path: str = './data/recommendations_u.parquet'
+    top_recs_path: str = './data/top_recs.parquet'
+    similar_items_path: str = './data/similar.parquet'
+
+    class Config:
+        env_prefix = 'APP_'
+
 class Recommendations:
 
     def __init__(self):
+        """
+        Инициализация объекта.
+        """
 
         self._recs = {"personal": None, "default": None}
         self._stats = {
@@ -20,7 +33,12 @@ class Recommendations:
 
     def load(self, type, path, **kwargs):
         """
-        Загружает рекомендации из файла
+        Загружает рекомендации из файла.
+
+        Аргументы:
+        - type: Тип рекомендаций (personal или default).
+        - path: Путь к файлу с рекомендациями.
+        - kwargs: Дополнительные аргументы для pd.read_parquet.
         """
 
         logger.info(f"Loading recommendations, type: {type}")
@@ -31,7 +49,11 @@ class Recommendations:
 
     def get(self, user_id: int, k: int=100):
         """
-        Возвращает список рекомендаций для пользователя
+        Возвращает список рекомендаций для пользователя.
+
+        Аргументы:
+        - user_id: Идентификатор пользователя.
+        - k: Количество рекомендаций (по умолчанию 100).
         """
         try:
             recs = self._recs["personal"].loc[user_id]
@@ -47,20 +69,41 @@ class Recommendations:
         return recs
 
     def stats(self):
-
+    """
+    Вывод статистики по запросам рекомендаций.
+    """
         logger.info("Stats for recommendations")
         for name, value in self._stats.items():
             logger.info(f"{name:<30} {value} ")
 
 class EventStore:
 
+     """
+    Класс для хранения и получения событий.
+
+    Методы:
+    - __init__: Инициализация объекта.
+    - put: Сохранение события.
+    - get: Получение событий для пользователя.
+    """
+
     def __init__(self, max_events_per_user=10):
+        """
+        Инициализация объекта.
+
+        Аргументы:
+        - max_events_per_user: Максимальное количество событий на пользователя (по умолчанию 10).
+        """
         self.events = {}
         self.max_events_per_user = max_events_per_user
 
     def put(self, user_id, item_id):
         """
-        Сохраняет событие
+        Сохраняет событие.
+
+        Аргументы:
+        - user_id: Идентификатор пользователя.
+        - item_id: Идентификатор события.
         """
         try:
             user_events = self.events[user_id]
@@ -70,20 +113,38 @@ class EventStore:
 
     def get(self, user_id, k):
         """
-        Возвращает события для пользователя
+        Возвращает события для пользователя.
+
+        Аргументы:
+        - user_id: Идентификатор пользователя.
+        - k: Количество событий (по умолчанию все доступные события).
         """
         user_events = self.events[user_id][:k]
 
         return user_events
     
 class SimilarItems:
+    
 
     def __init__(self):
         self._similar_items = None
+        """
+        Класс для работы со схожими объектами.
+
+        Методы:
+        - __init__: Инициализация объекта.
+        - load: Загрузка данных из файла.
+        - get: Получение списка похожих объектов.
+        """
 
     def load(self, path, columns, **kwargs):
         """
-        Загружаем данные из файла
+        Загружает данные из файла.
+
+        Аргументы:
+        - path: Путь к файлу с данными.
+        - columns: Список столбцов для загрузки.
+        - kwargs: Дополнительные аргументы для pd.read_parquet.
         """
 
         logger.info(f"Loading data, type: {type}")
@@ -93,7 +154,11 @@ class SimilarItems:
 
     def get(self, item_id: int, k: int = 10):
         """
-        Возвращает список похожих объектов
+        Возвращает список похожих объектов.
+
+        Аргументы:
+        - item_id: Идентификатор исходного объекта.
+        - k: Количество похожих объектов (по умолчанию 10).
         """
         try:
             i2i = self._similar_items[self._similar_items['item_id_1']==item_id]
@@ -115,18 +180,20 @@ def dedup_ids(ids):
     return ids
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI, config: Config):
     # код ниже (до yield) выполнится только один раз при запуске сервиса
     logger.info("Starting")
 
     # предзагрузим рекомендации
+    rec_store_path = config.recommendations_path
     rec_store.load(
         "personal",
-        './data/recommendations_u.parquet',
+        rec_store_path,
         columns=["user_id", "item_id", "rank"]
         )
         
     # предзагрузим свмые популярные треки
+    top_recs_path = config.top_recs_path
     rec_store.load(
         "default",
         './data/top_recs.parquet',
@@ -134,6 +201,7 @@ async def lifespan(app: FastAPI):
         )
     
     # предзагрузим данные о похожих треках
+    similar_items_path = config.similar_items_path
     sim_items_store.load(
         "./data/similar.parquet",
         columns=["item_id_1", "item_id_2", "score"]
@@ -183,6 +251,9 @@ async def recommendations_offline(user_id: int, k: int = 100):
     Возвращает список рекомендаций длиной k для пользователя user_id
     """
     recs = rec_store.get(user_id=user_id, k=k)
+    
+    if recs is None:
+        raise HTTPException(status_code=404, detail="Recommendations not found")
 
     return {"recs": recs}
 
@@ -208,13 +279,20 @@ async def recommendations_online(user_id: int, k: int = 100):
     #resp = requests.post(events_store_url + "/get", headers=headers, params=params)
     events = events_store.get(user_id, k)
     # получаем список айтемов, похожих на последние три, с которыми взаимодействовал пользователь
+    if not events:
+        return {"recs": []}  # Если нет событий, возвращаем пустой список
     items = []
     scores = []
     for item_id in events:
         # для каждого item_id получаем список похожих в item_similar_items
         item_similar_items = sim_items_store.get(item_id, k)
-        items += item_similar_items["item_id_2"]
-        scores += item_similar_items["score"]
+        if "item_id_2" in item_similar_items and "score" in item_similar_items:
+            items += item_similar_items["item_id_2"]
+            scores += item_similar_items["score"]
+
+    if not items:  # Если нет похожих предметов
+        return {"recs": []}
+    
     # сортируем похожие объекты по scores в убывающем порядке
     # для старта это приемлемый подход
     combined = list(zip(items, scores))
@@ -225,17 +303,29 @@ async def recommendations_online(user_id: int, k: int = 100):
     recs = dedup_ids(combined)
     return {"recs": recs} 
 
+
 @app.post("/recommendations")
 async def recommendations(user_id: int, k: int = 100):
     """
     Возвращает список рекомендаций длиной k для пользователя user_id
     """
+    
+    async def main(user_id: int, k: int = 100):
+        # Инициализация асинхронных задач
+        tasks = [
+            asyncio.create_task(recommendations_offline(user_id, k)),
+            asyncio.create_task(recommendations_online(user_id, k))
+            ]
+        
+        # Запуск задач параллельно
+        results = await asyncio.gather(*tasks)
+        return results
+    
+    recs_offline, recs_online = await main(user_id, k)
 
-    recs_offline = await recommendations_offline(user_id, k)
-    recs_online = await recommendations_online(user_id, k)
-
-    recs_offline = recs_offline["recs"]
-    recs_online = recs_online["recs"]
+    # Проверка наличия ключа "recs"
+    recs_offline = recs_offline.get("recs", [])
+    recs_online = recs_online.get("recs", [])
     recs_blended = []
 
     min_length = min(len(recs_offline), len(recs_online))
