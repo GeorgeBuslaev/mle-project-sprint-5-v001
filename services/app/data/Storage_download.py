@@ -56,7 +56,7 @@ def download_files(bucket_name, file_names, file_name_s3_path):
 if __name__ == '__main__':
     bucket_name = 's3-student-mle-20240325-d5eb3b4dad'
     file_names = ['top_popular.parquet', 'similar.parquet', 'recommendations_u.parquet']
-    file_name_s3_path = 'bank_recsys/recommendations/'
+    file_name_s3_path = 'recsys/recommendations/'
     try:        
         logging.basicConfig(level=logging.INFO)
         download_files(bucket_name, file_names, file_name_s3_path)

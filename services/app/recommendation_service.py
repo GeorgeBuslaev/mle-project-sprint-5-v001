@@ -1,22 +1,24 @@
 import logging
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
-from prometheus_fastapi_instrumentator import Instrumentator
+#from prometheus_fastapi_instrumentator import Instrumentator
 import logging as logger
 import pandas as pd
-from pydantic import BaseSettings
+import pydantic_settings as pydantic
 import asyncio
 import json
 
 logger = logging.getLogger("uvicorn.error")
 
-class Config(BaseSettings):
+class Config(pydantic.BaseSettings):
     recommendations_path: str = './data/recommendations_u.parquet'
     top_recs_path: str = './data/top_recs.parquet'
     similar_items_path: str = './data/similar.parquet'
 
     class Config:
         env_prefix = 'APP_'
+
+config = Config()  # Создаем один экземпляр конфигурации
 
 class Recommendations:
 
@@ -69,16 +71,16 @@ class Recommendations:
         return recs
 
     def stats(self):
-    """
-    Вывод статистики по запросам рекомендаций.
-    """
+        """
+        Вывод статистики по запросам рекомендаций.
+        """
         logger.info("Stats for recommendations")
         for name, value in self._stats.items():
             logger.info(f"{name:<30} {value} ")
 
 class EventStore:
 
-     """
+    """
     Класс для хранения и получения событий.
 
     Методы:
@@ -152,7 +154,7 @@ class SimilarItems:
         self._similar_items = self._similar_items[columns]
         logger.info(f"Loaded")
 
-    def get(self, item_id: int, k: int = 10):
+    def get(self, item_id: str, k: int = 10):
         """
         Возвращает список похожих объектов.
 
@@ -180,7 +182,7 @@ def dedup_ids(ids):
     return ids
 
 @asynccontextmanager
-async def lifespan(app: FastAPI, config: Config):
+async def lifespan(app: FastAPI):
     # код ниже (до yield) выполнится только один раз при запуске сервиса
     logger.info("Starting")
 
@@ -197,7 +199,7 @@ async def lifespan(app: FastAPI, config: Config):
     rec_store.load(
         "default",
         './data/top_recs.parquet',
-        columns=["item_id", "rank"]
+        columns=["item_id"] #, "rank"]
         )
     
     # предзагрузим данные о похожих треках
@@ -212,6 +214,7 @@ async def lifespan(app: FastAPI, config: Config):
     rec_store.stats()
     logger.info("Stopping")
 
+
 events_store = EventStore()
 
 rec_store = Recommendations()
@@ -222,11 +225,11 @@ sim_items_store = SimilarItems()
 app = FastAPI(title="recommendations", lifespan=lifespan)
 
 # инициализируем и запускаем экпортёр метрик
-instrumentator = Instrumentator()
-instrumentator.instrument(app).expose(app)
+#instrumentator = Instrumentator()
+#instrumentator.instrument(app).expose(app)
 
 @app.post("/put")
-async def put(user_id: int, item_id: int):
+async def put(user_id: int, item_id: str):
     """
     Сохраняет событие для user_id, item_id
     """
@@ -258,7 +261,7 @@ async def recommendations_offline(user_id: int, k: int = 100):
     return {"recs": recs}
 
 @app.post("/similar_items")
-async def recommendations(item_id: int, k: int = 10):
+async def recommendations(item_id: str, k: int = 10):
     """
     Возвращает список похожих объектов длиной k для item_id
     """
